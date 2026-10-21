@@ -590,7 +590,11 @@ configuration is stored or transported.
 
 ```json
 {
-  "id": "sha256:9f2c1ab4e7d05836a1c4e2fb77a90d3e5c81b6f4a2093de7cc15b840e6a37f21",
+  "id": "sha256:ba1d6f33f1087bced364cc111f8792103ef5a83c63215f5e8f4492dc7ee5e876",
+  "metadata": {
+    "title": "Safety cap",
+    "description": "Quality dimensions are averaged, then limited by sybil resistance so a weak safety dimension governs the score rather than being diluted by it."
+  },
   "nodes": [
     {
       "name": "quality",
@@ -615,6 +619,7 @@ configuration is stored or transported.
 | `id` | string | REQUIRED | Stable graph identifier. See [Graph Identity](#graph-identity). |
 | `nodes` | array of [Node object](#node-object) | REQUIRED | At least one node. Node names MUST be unique. |
 | `output` | string | REQUIRED | The `name` of the node whose value becomes the composed score. |
+| `metadata` | object | OPTIONAL | Human-readable labels. See [Metadata](#metadata). |
 
 ##### Node object
 
@@ -624,9 +629,30 @@ configuration is stored or transported.
 | `operator` | string | REQUIRED | A core operator from the [Operator Catalog](#operator-catalog), or an extension operator identifier. |
 | `inputs` | array of string | REQUIRED | Ordered [input references](#input-references). Order is significant and MUST be preserved. MUST be absent or empty for `constant`. |
 | `parameters` | object | CONDITIONAL | REQUIRED when the operator declares parameters; MUST be absent or empty otherwise. |
+| `metadata` | object | OPTIONAL | Human-readable labels. See [Metadata](#metadata). |
 
 `nodes` is an array rather than a name-keyed object so that duplicate node names are
 detectable rather than resolved by serializer behaviour.
+
+##### Metadata
+
+A graph, and any node within it, MAY carry a `metadata` object holding human-readable
+labels. It is informative: implementations MUST NOT let its contents affect evaluation.
+
+| Field | Type | Requiredness | Description |
+| --- | --- | --- | --- |
+| `title` | string | OPTIONAL | Short name for display, such as `"Safety cap"`. |
+| `description` | string | OPTIONAL | What the graph or node does, and why, in prose. |
+
+Members of `metadata` that an implementation does not recognize MUST be ignored rather
+than rejected, so that descriptive conventions can be added without invalidating graphs
+that already exist. This is the one exception to [Validation](#validation) rule 10.
+
+`metadata` is excluded from the [canonical form](#canonical-form). Correcting a title or
+translating a description therefore does not change the graph's identifier, and two graphs
+that compute identically remain recognizable as the same policy whatever they are called.
+The consequence is that `metadata` is not covered by the identifier: a consumer MUST NOT
+rely on it to establish what a graph computes, and MUST read the nodes for that.
 
 ##### Operator parameters
 
@@ -642,7 +668,7 @@ detectable rather than resolved by serializer behaviour.
 
 | Operator | Declared inputs |
 | --- | --- |
-| `cap`, `gate` | exactly 2 — the primary input, then the limiting or condition input |
+| `cap`, `gate` | exactly 2 — the governed signal, then the limiting or condition signal |
 | `weightedMean`, `mean`, `min`, `max`, `median` | one or more |
 | `constant` | none |
 
@@ -695,8 +721,8 @@ declaration order. `vⱼ` is the value of input `iⱼ`.
 | `min` | — | smallest value in `A` |
 | `max` | — | largest value in `A` |
 | `median` | — | middle value of the sorted values in `A`; mean of the two middle values when `\|A\|` is even |
-| `cap` | — | `min(v₁, v₂)` — the primary input `i₁` limited so it does not exceed the limiting input `i₂` |
-| `gate` | `below`, `cap` | `v₂ < below ? min(v₁, cap) : v₁`, where `i₁` is the primary input and `i₂` the condition |
+| `cap` | — | `min(v₁, v₂)` — the governed signal `i₁` limited so it does not exceed the limiting signal `i₂` |
+| `gate` | `below`, `cap` | `v₂ < below ? min(v₁, cap) : v₁`, where `i₁` is the governed signal and `i₂` the condition signal |
 | `constant` | `value` | `value` |
 
 **Weights bind to declared inputs.** For `weightedMean`, `weights` MUST have exactly `m`
@@ -706,14 +732,19 @@ list; doing so would silently apply one input's weight to another. A `weights` l
 length differs from the declared input count MUST be rejected as a configuration error. If
 `Σ_{iⱼ ∈ A} wⱼ = 0` the node is **unavailable**.
 
-`cap` imposes an **upper** bound: it limits the primary input to the limiting input's value.
-It is not a lower bound — `cap(20, 60) = 20`, not `60`. A lower bound is expressed with
-`max`. `gate` is the conditional form of the same idea: it caps the primary input at the
-constant `cap`, but only when the condition input falls below `below`.
+`cap` imposes an **upper** bound: it limits the governed signal to the limiting signal's
+value. It is not a lower bound — `cap(20, 60) = 20`, not `60`. A lower bound is expressed
+with `max`. `gate` is the conditional form of the same idea: it caps the governed signal at
+the constant `cap`, but only when the condition signal falls below `below`.
 
-`cap` and `gate` are ordered, two-input operators: the first input is the primary value
-being governed, the second is the limiting or condition input. Implementations MUST NOT
-reorder their inputs.
+`cap` and `gate` are ordered, two-input operators, and their inputs are named by position
+throughout this section: `i₁` is the **governed signal** — the value the node constrains —
+and `i₂` is the **limiting signal** (`cap`) or the **condition signal** (`gate`).
+Implementations MUST NOT reorder them.
+
+These are the signal roles of [Trust Signals](#trust-signals): whichever form a reference
+takes — an adapter total, a component, or another node — at these positions it carries a
+value and a [status](#signal-status-codes), and the rules below are stated in those terms.
 
 ##### Extension operators
 
@@ -766,13 +797,13 @@ consistent with [Missing and Stale Data](#missing-and-stale-data).
    to `0`.
 2. For `min`, `max`, `mean`, `median` and `weightedMean`, if every input is unavailable
    the node is unavailable.
-3. For `cap` and `gate`, if the primary input is unavailable the node is unavailable.
-4. For `cap` and `gate`, the limiting or condition input MUST have status `ok` or `stale`
+3. For `cap` and `gate`, if the governed signal is unavailable the node is unavailable.
+4. For `cap` and `gate`, the limiting or condition signal MUST have status `ok` or `stale`
    for a constraint to be applied. If its status is `missing`, `timeout`, or `error`, the
-   node's value MUST be the primary input unchanged, and the node MUST be reported as
+   node's value MUST be the governed signal unchanged, and the node MUST be reported as
    having applied no constraint.
 
-   This applies whether the input was omitted as unavailable **or** carries a deterministic
+   This applies whether the signal was omitted as unavailable **or** carries a deterministic
    `0` produced by its adapter's contribution mode (see
    [Contribution Modes](#contribution-modes) and
    [Missing and Stale Data](#missing-and-stale-data)). A `0` that stands for "not measured"
@@ -795,8 +826,8 @@ to [Composite AI Trust Score](#composite-ai-trust-score) in place of a graph it 
 rejecting the configuration and silently scoring under different semantics are not the same
 outcome.
 
-1. **Missing or malformed required field** — any REQUIRED field absent, or of the wrong
-   type.
+1. **Missing or malformed required field** — any REQUIRED field absent, or any field
+   present with a value of the wrong type.
 2. **Duplicate node name**, or a `name` that does not match the required pattern.
 3. **Unknown output** — `output` does not name a node in `nodes`.
 4. **Unresolvable reference** — an input references an adapter, component, or node that the
@@ -813,9 +844,10 @@ outcome.
    required arity.
 10. **Unrecognized field** — a field not defined by this section. Implementations MUST
     reject unrecognized fields, except fields whose names carry a namespace prefix
-    containing a `.` (for example `com.example.hint`), which MUST be ignored. This keeps
-    vendor annotations possible without allowing a typo in a normative field name to pass
-    silently.
+    containing a `.` (for example `com.example.hint`), which MUST be ignored, and members
+    of a [`metadata`](#metadata) object, which MUST be ignored. This keeps vendor
+    annotations and descriptive labels possible without allowing a typo in a normative
+    field name to pass silently.
 
 Implementations MAY additionally reject a graph that exceeds implementation-defined bounds
 on node count or graph depth; see [Security Considerations](#security-considerations).
@@ -839,6 +871,8 @@ The canonical form of a composition graph is its JSON serialization with:
 
 - object keys sorted by Unicode code point, at every level;
 - the `id` field omitted, so that the identifier does not depend on itself;
+- every `metadata` object omitted, at the graph and at every node, so that human-readable
+  labels never change the identifier;
 - arrays — `nodes`, `inputs`, `weights` — in their declared order, which is significant;
 - no insignificant whitespace; and
 - numbers in their shortest round-trippable decimal form.
@@ -1152,7 +1186,7 @@ adapter is excluded from the denominator and `component:corroboration.sources` i
 unavailable.
 
 ```
-value(governed) = 90   (primary passes through; no constraint applied)
+value(governed) = 90   (governed signal passes through; no constraint applied)
 ```
 
 **Case (c) — condition is a deterministic `0` from missingness.** `corroboration` instead
@@ -1164,7 +1198,7 @@ Without a composition graph: `trustScore = (90 + 0) / 2 = 45`.
 
 ```
 condition = 0, status timeout
-→ value(governed) = 90   (primary passes through; no constraint applied)
+→ value(governed) = 90   (governed signal passes through; no constraint applied)
 ```
 
 The condition is numerically `0`, which is below `below = 50`, but that `0` stands for "not
@@ -1172,7 +1206,7 @@ measured" rather than a measured absence of corroboration. Applying the cap here
 yield `70` — and under a `cap` node limiting by this adapter directly, `min(90, 0) = 0` —
 on the basis of a signal that never arrived. Per rule 4 of
 [Availability and Status Propagation](#availability-and-status-propagation), a limiting or
-condition input whose status is `missing`, `timeout`, or `error` imposes no constraint.
+condition signal whose status is `missing`, `timeout`, or `error` imposes no constraint.
 
 In all three cases a missing safety signal neither imposes nor removes a cap, and the
 node's status records why.
@@ -1275,22 +1309,28 @@ Next: Optionally expand the signal catalog with more ecosystem-specific signal s
 Review feedback incorporated before merge: the `floor` operator was renamed `cap` (it
 imposes an upper bound — `min()` caps rather than floors); `weightedMean` weights were
 made explicitly bound to *declared* inputs so they cannot slide onto a different input when
-one is unavailable; a limiting or condition input whose status is `missing`, `timeout` or
+one is unavailable; a limiting or condition signal whose status is `missing`, `timeout` or
 `error` now imposes no constraint, so a deterministic `0` standing for "not measured" can
 no longer clamp a composite to zero (Test Vector 5, case (c)); the composition-graph
 representation was made normative with a field-definition table, per-operator parameter
 types, a [Validation](#validation) section and a [Graph Identity](#graph-identity) section
-defining a canonical form and content-derived identifier; extension operators now require
-namespaced, versioned identifiers; an implementation that does not support composition
-graphs MUST reject a configuration containing one rather than silently scoring under the
-default aggregation; and worked graphs were added under
-[`./hcs-25/examples/`](./hcs-25/examples/README.md).
+defining a canonical form and content-derived identifier; the two-input roles of `cap` and
+`gate` are now named as the **governed**, **limiting** and **condition** signals, in the
+vocabulary of [Trust Signals](#trust-signals), rather than as a "primary input"; an OPTIONAL
+[`metadata`](#metadata) object carrying `title` and `description` was added at the graph and
+node level, excluded from the canonical form so that labels never change a graph's
+identifier; extension operators now require namespaced, versioned identifiers; an
+implementation that does not support composition graphs MUST reject a configuration
+containing one rather than silently scoring under the default aggregation; and worked
+graphs were added under [`./hcs-25/examples/`](./hcs-25/examples/README.md).
 
 Editorial, required by the new validation rules: Test Vector 1 used `simple_evals` as an
 adapter identifier, which [Adapter Identifier Namespacing](#adapter-identifier-namespacing)
 does not permit. Since [Validation](#validation) now requires every input reference to match
 that pattern, the vector contradicted the document. Corrected to `simple-evals`; no computed
-value changes.
+value changes. The identifier on the illustrative graph in
+[Graph Configuration](#graph-configuration) was a placeholder that did not match its own
+canonical form; it now carries the digest that graph actually derives.
 
 ## License
 

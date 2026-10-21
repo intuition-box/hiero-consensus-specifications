@@ -642,7 +642,7 @@ detectable rather than resolved by serializer behaviour.
 
 | Operator | Declared inputs |
 | --- | --- |
-| `cap`, `gate` | exactly 2 — the primary input, then the limiting or condition input |
+| `cap`, `gate` | exactly 2 — the governed input, then the limiting or condition input |
 | `weightedMean`, `mean`, `min`, `max`, `median` | one or more |
 | `constant` | none |
 
@@ -695,8 +695,8 @@ declaration order. `vⱼ` is the value of input `iⱼ`.
 | `min` | — | smallest value in `A` |
 | `max` | — | largest value in `A` |
 | `median` | — | middle value of the sorted values in `A`; mean of the two middle values when `\|A\|` is even |
-| `cap` | — | `min(v₁, v₂)` — the primary input `i₁` limited so it does not exceed the limiting input `i₂` |
-| `gate` | `below`, `cap` | `v₂ < below ? min(v₁, cap) : v₁`, where `i₁` is the primary input and `i₂` the condition |
+| `cap` | — | `min(v₁, v₂)` — the governed input `i₁` limited so it does not exceed the limiting input `i₂` |
+| `gate` | `below`, `cap` | `v₂ < below ? min(v₁, cap) : v₁`, where `i₁` is the governed input and `i₂` the condition input |
 | `constant` | `value` | `value` |
 
 **Weights bind to declared inputs.** For `weightedMean`, `weights` MUST have exactly `m`
@@ -706,14 +706,16 @@ list; doing so would silently apply one input's weight to another. A `weights` l
 length differs from the declared input count MUST be rejected as a configuration error. If
 `Σ_{iⱼ ∈ A} wⱼ = 0` the node is **unavailable**.
 
-`cap` imposes an **upper** bound: it limits the primary input to the limiting input's value.
-It is not a lower bound — `cap(20, 60) = 20`, not `60`. A lower bound is expressed with
-`max`. `gate` is the conditional form of the same idea: it caps the primary input at the
-constant `cap`, but only when the condition input falls below `below`.
+`cap` imposes an **upper** bound: it limits the governed input to the limiting input's
+value. It is not a lower bound — `cap(20, 60) = 20`, not `60`. A lower bound is expressed
+with `max`. `gate` is the conditional form of the same idea: it caps the governed input at
+the constant `cap`, but only when the condition input falls below `below`.
 
-`cap` and `gate` are ordered, two-input operators: the first input is the primary value
-being governed, the second is the limiting or condition input. Implementations MUST NOT
-reorder their inputs.
+`cap` and `gate` are ordered, two-input operators. `i₁` is the **governed input** — the
+value the node constrains — and `i₂` is the **limiting input** (`cap`) or the **condition
+input** (`gate`). Each resolves to an adapter total, a component, or another node, and
+carries that value's status, which is one of the
+[signal status codes](#signal-status-codes). Implementations MUST NOT reorder them.
 
 ##### Extension operators
 
@@ -766,10 +768,10 @@ consistent with [Missing and Stale Data](#missing-and-stale-data).
    to `0`.
 2. For `min`, `max`, `mean`, `median` and `weightedMean`, if every input is unavailable
    the node is unavailable.
-3. For `cap` and `gate`, if the primary input is unavailable the node is unavailable.
+3. For `cap` and `gate`, if the governed input is unavailable the node is unavailable.
 4. For `cap` and `gate`, the limiting or condition input MUST have status `ok` or `stale`
    for a constraint to be applied. If its status is `missing`, `timeout`, or `error`, the
-   node's value MUST be the primary input unchanged, and the node MUST be reported as
+   node's value MUST be the governed input unchanged, and the node MUST be reported as
    having applied no constraint.
 
    This applies whether the input was omitted as unavailable **or** carries a deterministic
@@ -1152,7 +1154,7 @@ adapter is excluded from the denominator and `component:corroboration.sources` i
 unavailable.
 
 ```
-value(governed) = 90   (primary passes through; no constraint applied)
+value(governed) = 90   (governed input passes through; no constraint applied)
 ```
 
 **Case (c) — condition is a deterministic `0` from missingness.** `corroboration` instead
@@ -1164,7 +1166,7 @@ Without a composition graph: `trustScore = (90 + 0) / 2 = 45`.
 
 ```
 condition = 0, status timeout
-→ value(governed) = 90   (primary passes through; no constraint applied)
+→ value(governed) = 90   (governed input passes through; no constraint applied)
 ```
 
 The condition is numerically `0`, which is below `below = 50`, but that `0` stands for "not
@@ -1280,7 +1282,11 @@ one is unavailable; a limiting or condition input whose status is `missing`, `ti
 no longer clamp a composite to zero (Test Vector 5, case (c)); the composition-graph
 representation was made normative with a field-definition table, per-operator parameter
 types, a [Validation](#validation) section and a [Graph Identity](#graph-identity) section
-defining a canonical form and content-derived identifier; extension operators now require
+defining a canonical form and content-derived identifier; the two input positions of `cap`
+and `gate` are now named — `i₁` the **governed input**, `i₂` the **limiting** or
+**condition input** — and the section states what can occupy them and that each carries one
+of the [signal status codes](#signal-status-codes), in place of the undefined term "primary
+input"; extension operators now require
 namespaced, versioned identifiers; an implementation that does not support composition
 graphs MUST reject a configuration containing one rather than silently scoring under the
 default aggregation; and worked graphs were added under
